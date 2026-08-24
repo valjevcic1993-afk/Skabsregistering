@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="da">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Skabsregistrering</title>
+
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #f4f4f4;
+      margin: 0;
+      padding: 20px;
+      text-align: center;
+    }
+
+    .box {
+      max-width: 500px;
+      margin: 50px auto;
+      background: white;
+      padding: 30px;
+      border-radius: 15px;
+      box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+    }
+
+    h1 {
+      margin-bottom: 10px;
+    }
+
+    .locker {
+      font-size: 32px;
+      font-weight: bold;
+      margin: 25px 0;
+    }
+
+    input, button {
+      width: 100%;
+      box-sizing: border-box;
+      padding: 15px;
+      margin-top: 10px;
+      font-size: 17px;
+      border-radius: 8px;
+    }
+
+    input {
+      border: 1px solid #ccc;
+    }
+
+    button {
+      border: none;
+      background: #111;
+      color: white;
+      cursor: pointer;
+    }
+
+    button:hover {
+      opacity: 0.85;
+    }
+
+    #message {
+      margin-top: 20px;
+      font-weight: bold;
+    }
+  </style>
+</head>
+
+<body>
+
+<div class="box">
+
+  <h1>Skabsregistrering</h1>
+
+  <div id="loading">
+    Henter skab...
+  </div>
+
+  <div id="content" style="display:none;">
+
+    <div>Du er ved skab:</div>
+
+    <div class="locker" id="lockerNumber"></div>
+
+    <input
+      type="text"
+      id="employeeId"
+      placeholder="Indtast medarbejder-ID"
+    >
+
+    <button onclick="registerLocker()">
+      Registrér skab
+    </button>
+
+    <div id="message"></div>
+
+  </div>
+
+</div>
+
+<script>
+  /*
+    SUPABASE-OPLYSNINGER KOMMER HER.
+    Vi indsætter dem sammen bagefter.
+  */
+
+  const SUPABASE_URL = "DIN_SUPABASE_URL";
+  const SUPABASE_KEY = "DIN_PUBLIC_SUPABASE_KEY";
+
+  const params = new URLSearchParams(window.location.search);
+  const token = params.get("token");
+
+  let locker = null;
+
+  async function loadLocker() {
+
+    if (!token) {
+      document.getElementById("loading").innerText =
+        "QR-koden er ugyldig.";
+      return;
+    }
+
+    try {
+
+      const response = await fetch(
+        `${SUPABASE_URL}/rest/v1/lockers?qr_token=eq.${token}&select=id,locker_number,floor,status,employee_id`,
+        {
+          headers: {
+            "apikey": SUPABASE_KEY,
+            "Authorization": `Bearer ${SUPABASE_KEY}`
+          }
+        }
+      );
+
+      const data = await response.json();
+
+      if (!data.length) {
+        document.getElementById("loading").innerText =
+          "Skabet blev ikke fundet.";
+        return;
+      }
+
+      locker = data[0];
+
+      document.getElementById("loading").style.display = "none";
+      document.getElementById("content").style.display = "block";
+
+      document.getElementById("lockerNumber").innerText =
+        locker.locker_number;
+
+    } catch (error) {
+
+      console.error(error);
+
+      document.getElementById("loading").innerText =
+        "Der opstod en fejl.";
+    }
+  }
+
+
+  async function registerLocker() {
+
+    const employeeId =
+      document.getElementById("employeeId").value.trim();
+
+    const message =
+      document.getElementById("message");
+
+    if (!employeeId) {
+      message.innerText =
+        "Indtast medarbejder-ID.";
+      return;
+    }
+
+    try {
+
+      const response = await fetch(
+        `${SUPABASE_URL}/rest/v1/lockers?id=eq.${locker.id}`,
+        {
+          method: "PATCH",
+
+          headers: {
+            "Content-Type": "application/json",
+            "apikey": SUPABASE_KEY,
+            "Authorization": `Bearer ${SUPABASE_KEY},
+            "Prefer": "return=minimal"
+          },
+
+          body: JSON.stringify({
+            employee_id: employeeId,
+            status: "occupied",
+            assigned_at: new Date().toISOString()
+          })
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error("Registrering fejlede");
+      }
+
+      message.innerText =
+        "Skabet er registreret.";
+
+    } catch (error) {
+
+      console.error(error);
+
+      message.innerText =
+        "Der opstod en fejl ved registreringen.";
+    }
+  }
+
+  loadLocker();
+</script>
+
+</body>
+</html>
