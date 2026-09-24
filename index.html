@@ -1,63 +1,281 @@
-create or replace function public.claim_locker(
-  p_qr_token uuid,
-  p_employee_id text,
-  p_name text
-)
-returns json
-language plpgsql
-security definer
-as $$
-declare
-  v_locker lockers%rowtype;
-  v_employee employees%rowtype;
-begin
-  select *
-  into v_locker
-  from lockers
-  where qr_token = p_qr_token
-  for update;
+<!DOCTYPE html>
+<html lang="da">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Skabsregistrering</title>
 
-  if not found then
-    return json_build_object('success', false, 'error', 'Skab ikke fundet');
-  end if;
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #f4f4f4;
+      margin: 0;
+      padding: 20px;
+      text-align: center;
+    }
 
-  if v_locker.status <> 'available' then
-    return json_build_object('success', false, 'error', 'Skabet er allerede optaget');
-  end if;
+    .box {
+      max-width: 500px;
+      margin: 40px auto;
+      background: white;
+      padding: 30px;
+      border-radius: 15px;
+      box-shadow: 0 3px 15px rgba(0,0,0,.12);
+    }
 
-  insert into employees (employee_id, name, active)
-  values (p_employee_id, p_name, true)
-  on conflict (employee_id)
-  do update set name = excluded.name
-  returning * into v_employee;
+    h1 {
+      margin-bottom: 10px;
+    }
 
-  update lockers
-  set
-    status = 'occupied',
-    employee_id = v_employee.id,
-    assigned_at = now(),
-    updated_at = now()
-  where id = v_locker.id;
+    .locker {
+      font-size: 32px;
+      font-weight: bold;
+      margin: 25px 0;
+    }
 
-  insert into locker_history (
-    locker_id,
-    employee_id,
-    action,
-    created_at
-  )
-  values (
-    v_locker.id,
-    v_employee.id,
-    'assigned',
-    now()
-  );
+    input {
+      width: 100%;
+      box-sizing: border-box;
+      padding: 14px;
+      margin: 8px 0;
+      border: 1px solid #ccc;
+      border-radius: 8px;
+      font-size: 16px;
+    }
 
-  return json_build_object(
-    'success', true,
-    'locker_number', v_locker.locker_number
-  );
-end;
-$$;
+    button {
+      width: 100%;
+      padding: 14px;
+      margin-top: 15px;
+      border: 0;
+      border-radius: 8px;
+      background: #111;
+      color: white;
+      font-size: 17px;
+      cursor: pointer;
+    }
 
-grant execute on function public.claim_locker(uuid, text, text) to anon;
-grant execute on function public.claim_locker(uuid, text, text) to authenticated;
+    button:disabled {
+      background: #999;
+    }
+
+    #message {
+      margin-top: 20px;
+      font-weight: bold;
+    }
+  </style>
+</head>
+
+<body>
+
+<div class="box">
+
+  <h1>Skabsregistrering</h1>
+
+  <div id="loading">Henter skab...</div>
+
+  <div id="content" style="display:none;">
+
+    <div class="locker">
+      Skab <span id="lockerNumber"></span>
+    </div>
+
+    <div id="status"></div>
+
+    <div id="form" style="display:none;">
+
+      <input
+        type="text"
+        id="employeeId"
+        placeholder="Medarbejder-ID"
+      >
+
+      <input
+        type="text"
+        id="employeeName"
+        placeholder="Navn"
+      >
+
+      <button id="registerButton">
+        Registrér skab
+      </button>
+
+    </div>
+
+    <div id="message"></div>
+
+  </div>
+
+</div>
+
+<script>
+
+const SUPABASE_URL =
+  "https://pwgwujojffxinfbqjlyb.supabase.co";
+
+const SUPABASE_KEY =
+ sb_publishable_G7rR-9dHQLEdCLpysjNeKA_VHqhCsYz
+
+
+const token =
+  new URLSearchParams(window.location.search).get("token");
+
+
+const loading = document.getElementById("loading");
+const content = document.getElementById("content");
+const lockerNumber = document.getElementById("lockerNumber");
+const status = document.getElementById("status");
+const form = document.getElementById("form");
+const message = document.getElementById("message");
+const registerButton =
+  document.getElementById("registerButton");
+
+
+async function loadLocker() {
+
+  if (!token) {
+    loading.textContent =
+      "QR-koden mangler.";
+    return;
+  }
+
+  try {
+
+    const response = await fetch(
+      `${SUPABASE_URL}/rest/v1/lockers?qr_token=eq.${encodeURIComponent(token)}&select=id,locker_number,floor,status`
+    , {
+      headers: {
+        "apikey": SUPABASE_KEY,
+        "Authorization": `Bearer ${SUPABASE_KEY}`
+      }
+    });
+
+    const lockers = await response.json();
+
+    if (!response.ok || lockers.length === 0) {
+      loading.textContent =
+        "Skabet blev ikke fundet.";
+      return;
+    }
+
+    const locker = lockers[0];
+
+    lockerNumber.textContent =
+      locker.locker_number;
+
+    loading.style.display = "none";
+    content.style.display = "block";
+
+    if (locker.status === "available") {
+
+      status.textContent =
+        "Skabet er ledigt.";
+
+      form.style.display = "block";
+
+    } else {
+
+      status.textContent =
+        "Dette skab er allerede optaget.";
+
+    }
+
+  } catch (error) {
+
+    console.error(error);
+
+    loading.textContent =
+      "Der opstod en fejl. Prøv igen.";
+
+  }
+}
+
+
+registerButton.addEventListener("click", async () => {
+
+  const employeeId =
+    document.getElementById("employeeId").value.trim();
+
+  const employeeName =
+    document.getElementById("employeeName").value.trim();
+
+  if (!employeeId || !employeeName) {
+
+    message.textContent =
+      "Udfyld både medarbejder-ID og navn.";
+
+    return;
+  }
+
+  registerButton.disabled = true;
+  registerButton.textContent =
+    "Registrerer...";
+
+  try {
+
+    const response = await fetch(
+      `${SUPABASE_URL}/rest/v1/rpc/claim_locker`,
+      {
+        method: "POST",
+
+        headers: {
+          "Content-Type": "application/json",
+          "apikey": SUPABASE_KEY,
+          "Authorization": `Bearer ${SUPABASE_KEY}`
+        },
+
+        body: JSON.stringify({
+          p_qr_token: token,
+          p_employee_id: employeeId,
+          p_name: employeeName
+        })
+      }
+    );
+
+    const result = await response.json();
+
+    if (!response.ok) {
+      throw new Error(JSON.stringify(result));
+    }
+
+    if (result.success) {
+
+      form.style.display = "none";
+
+      status.textContent =
+        "Skabet er nu registreret.";
+
+      message.textContent =
+        `Skab ${result.locker_number} er registreret til ${employeeName}.`;
+
+    } else {
+
+      message.textContent =
+        result.error || "Kunne ikke registrere skabet.";
+
+      registerButton.disabled = false;
+      registerButton.textContent =
+        "Registrér skab";
+    }
+
+  } catch (error) {
+
+    console.error(error);
+
+    message.textContent =
+      "Der opstod en fejl. Prøv igen.";
+
+    registerButton.disabled = false;
+    registerButton.textContent =
+      "Registrér skab";
+  }
+
+});
+
+
+loadLocker();
+
+</script>
+
+</body>
+</html>
